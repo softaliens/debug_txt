@@ -1,1 +1,91 @@
-cabal configure --builddir=build-android --enable-shared --extra-lib-dirs=$OPENSSL_DIR/lib --extra-include-dirs=$OPENSSL_DIR/include
+The error you encountered suggests that there is a mismatch in architecture between the dependencies (e.g., `libcrypto.a`) and the target platform (`aarch64` for Android ARM64). Specifically, the static library `libcrypto.a` from OpenSSL appears to have been compiled for a different architecture.
+
+Let's address this systematically.
+
+---
+
+### **1. Root Cause**
+The error `unsupported ELF machine number 183` indicates that the linker (`ld`) tried to use a binary compiled for a different architecture (likely x86_64 instead of ARM64). This happened because the OpenSSL library in `deps/openssl-1.1.1u/output/lib` was not cross-compiled for the target platform.
+
+---
+
+### **2. Solution**
+You need to:
+1. Cross-compile OpenSSL for the Android ARM64 architecture.
+2. Ensure the SimplexMQ build process uses the correct OpenSSL libraries.
+
+---
+
+### **3. Steps to Fix**
+
+#### **Step 1: Cross-Compile OpenSSL**
+To cross-compile OpenSSL for Android ARM64:
+1. Download OpenSSL:
+   ```bash
+   cd deps
+   wget https://www.openssl.org/source/openssl-1.1.1u.tar.gz
+   tar -xvzf openssl-1.1.1u.tar.gz
+   cd openssl-1.1.1u
+   ```
+
+2. Configure OpenSSL for Android ARM64:
+   ```bash
+   export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+   export CC=aarch64-linux-android21-clang
+   export AR=aarch64-linux-android-ar
+   export RANLIB=aarch64-linux-android-ranlib
+
+   ./Configure android-arm64 no-shared no-dso --prefix=$(pwd)/output
+   ```
+
+3. Build OpenSSL:
+   ```bash
+   make -j$(nproc)
+   make install
+   ```
+
+   After this step, the ARM64 versions of `libcrypto.a` and `libssl.a` will be in the `output/lib` directory.
+
+---
+
+#### **Step 2: Configure Cabal to Use Cross-Compiled OpenSSL**
+Update the build environment to ensure SimplexMQ uses the correct OpenSSL libraries:
+1. Set `LIBRARY_PATH` and `CPATH` for the cross-compiled OpenSSL:
+   ```bash
+   export LIBRARY_PATH=$(pwd)/output/lib
+   export CPATH=$(pwd)/output/include
+   ```
+
+2. Verify paths:
+   - `$(pwd)/output/lib` should contain `libcrypto.a` and `libssl.a`.
+   - `$(pwd)/output/include` should contain OpenSSL headers.
+
+---
+
+#### **Step 3: Rebuild SimplexMQ**
+Return to the root directory of the SimplexMQ repository and rebuild:
+```bash
+cabal clean
+cabal build
+```
+
+---
+
+### **4. Verifying the Build**
+1. If the build succeeds, the `.so` file will be generated in `dist-newstyle`.
+2. Use the `file` command to confirm that the `.so` file is for ARM64:
+   ```bash
+   file dist-newstyle/build/aarch64-linux-android/ghc-*/simplexmq-*/build/libsimplexmq.so
+   ```
+   Output should indicate `ARM aarch64`.
+
+---
+
+### **5. Debugging Further Issues**
+If you encounter additional errors:
+- **OpenSSL linking errors:** Ensure `LIBRARY_PATH` and `CPATH` point to the correct cross-compiled libraries.
+- **GHC-specific errors:** Cabal might need additional flags for cross-compilation. Consult the GHC cross-compilation documentation.
+
+---
+
+Let me know if you face issues at any step, and I can assist further.
