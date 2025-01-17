@@ -1,4 +1,110 @@
-cabal configure --builddir=build-android \
-    --ghc-options="-optc-I/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include \
-    -optl-L/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib"
-cabal build -v --builddir=build-android
+Since the Android NDK does not provide a standalone `ld` (linker), you can rely on the **integrated linker (`lld`)** in `clang`, as this is the recommended way to handle linking when using the NDK. The integrated linker is fully capable of performing the necessary tasks.
+
+Here is a detailed approach to resolve your issue:
+
+---
+
+### **1. Verify the Toolchain**
+Ensure that you are using the correct toolchain and all tools are configured properly:
+
+```bash
+export CC=/home/baymax/Documents/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+export CXX=/home/baymax/Documents/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++
+export AR=/home/baymax/Documents/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
+export STRIP=/home/baymax/Documents/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip
+export LD=$CC  # Use clang as the linker
+```
+
+---
+
+### **2. Modify Cabal Settings**
+Pass flags to GHC and Cabal to ensure they use the `lld` linker integrated into `clang`.
+
+1. Clean the project to reset the build environment:
+   ```bash
+   cabal clean
+   ```
+
+2. Configure Cabal with the appropriate flags:
+   ```bash
+   cabal configure --builddir=build-android \
+       --ghc-options="-optc-I/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include \
+       -optl-L/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib \
+       -optl-fuse-ld=lld" \
+       --with-cc=$CC \
+       --with-cxx=$CXX \
+       --with-ar=$AR \
+       --with-strip=$STRIP \
+       --with-ld=$LD
+   ```
+
+   - `-optl-fuse-ld=lld`: Explicitly tells `clang` to use its built-in `lld` linker.
+
+---
+
+### **3. Ensure OpenSSL is Built Correctly**
+Make sure the `libcrypto.a` archive and its object files are built correctly for the ARM64 (aarch64) architecture.
+
+1. Clean and rebuild OpenSSL:
+   ```bash
+   cd /home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u
+   make clean
+   ./Configure android-arm64 no-shared no-dso --prefix=$(pwd)/output
+   make -j$(nproc)
+   make install
+   ```
+
+2. Verify `libcrypto.a` is for the correct architecture:
+   ```bash
+   file output/lib/libcrypto.a
+   ```
+
+   The output should indicate `ARM aarch64`.
+
+---
+
+### **4. Build with Cabal**
+Run the build process with a single thread to avoid running out of memory:
+
+```bash
+cabal build -v --builddir=build-android -j1
+```
+
+---
+
+### **5. Debug Linking Issues**
+If you still encounter issues, it might be necessary to debug the linking process:
+
+1. Enable verbose output during the build:
+   ```bash
+   cabal build -v3 --builddir=build-android -j1
+   ```
+
+2. Look at the linker invocation line. Ensure that:
+   - The `-L` flag points to the correct OpenSSL library directory.
+   - The `-lcrypto` flag is being used to link the `libcrypto.a`.
+
+3. If the linker still fails, you can forcefully pass the linker flags directly:
+   ```bash
+   cabal configure --builddir=build-android \
+       --ghc-options="-optc-I/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include \
+       -optl-L/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib \
+       -optl-fuse-ld=lld -optl-Wl,--verbose"
+   ```
+
+---
+
+### **6. Consider Using Prebuilt OpenSSL**
+If the problem persists, consider using a prebuilt OpenSSL for Android. You can download one from trusted sources or build it using tools like `termux`.
+
+For example, replace OpenSSL in the project with a prebuilt version:
+1. Download and extract the prebuilt OpenSSL.
+2. Update Cabal to link against the new OpenSSL library:
+   ```bash
+   cabal configure --builddir=build-android \
+       --ghc-options="-optc-I/path/to/prebuilt/openssl/include \
+       -optl-L/path/to/prebuilt/openssl/lib \
+       -optl-fuse-ld=lld"
+   ```
+
+Let me know how this approach works!
