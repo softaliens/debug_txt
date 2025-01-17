@@ -1,165 +1,97 @@
-cabal configure --builddir=build-android --enable-shared \
-    --extra-lib-dirs=/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib \
-    --extra-include-dirs=/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include
-
-
-The error indicates that Cabal is attempting to link an ARM64 object file (`sha512.o`) from your OpenSSL library with an x86_64 linker, resulting in the `unsupported ELF machine number 183` issue.
-
-Here is a **detailed debugging and resolution workflow**:
+The error indicates that the linker is attempting to use an incompatible object file, `sha512.o`, which is compiled for the ARM aarch64 architecture, with the default x86_64 toolchain on your system. To resolve this, you must ensure that the entire build process, including Cabal and GCC/LD, uses the Android ARM64 toolchain.
 
 ---
 
-### **Root Cause**
-The issue arises because:
-1. Cabal's build system defaults to using the system's native compiler and linker (`gcc` and `ld`) targeting x86_64.
-2. The OpenSSL library (`libcrypto.a`) you built is for ARM64 (`aarch64`) and cannot be linked with x86_64 tools.
+### **Debugging and Resolving the Issue**
 
----
-
-### **Detailed Debugging and Solution**
-
-#### **1. Verify OpenSSL Library Architecture**
-To confirm the architecture of `libcrypto.a`:
+#### **1. Verify the Toolchain Setup**
+Ensure the Android ARM64 toolchain is installed and accessible. If you haven’t done so, install it via the Android NDK:
 ```bash
-file /home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib/libcrypto.a
-```
-
-Expected output:
-```
-libcrypto.a: current ar archive
-```
-
-For the `.o` files inside:
-```bash
-cd /home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib
-ar t libcrypto.a | xargs -I {} file {}
-```
-
-Look for:
-```
-<filename>: ELF 64-bit LSB relocatable, ARM aarch64, version 1 (SYSV), not stripped
-```
-
-If the architecture is correct (ARM64), proceed.
-
----
-
-#### **2. Ensure ARM64 Toolchain Configuration**
-Ensure you set up the Android ARM64 toolchain. Add these environment variables to your shell:
-
-```bash
-export CC=aarch64-linux-android21-clang
-export CXX=aarch64-linux-android21-clang++
-export AR=aarch64-linux-android-ar
-export LD=aarch64-linux-android-ld
-export STRIP=aarch64-linux-android-strip
+export ANDROID_NDK=/path/to/android-ndk
+export TOOLCHAIN=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64
+export PATH=$TOOLCHAIN/bin:$PATH
 ```
 
 Verify the toolchain:
 ```bash
-$CC --version
-$CXX --version
+aarch64-linux-android21-clang --version
 ```
 
----
+#### **2. Set Environment Variables for Cabal**
+Override the default compiler and linker with the ARM64 cross-compiler:
+```bash
+export CC=aarch64-linux-android21-clang
+export CXX=aarch64-linux-android21-clang++
+export LD=aarch64-linux-android-ld
+export AR=aarch64-linux-android-ar
+export STRIP=aarch64-linux-android-strip
+```
 
-#### **3. Clean Cabal Environment**
-Clear the existing build directory and Cabal configuration:
+#### **3. Configure Cabal with Cross-Compilation**
+Use Cabal’s `--ghc-options` flag to specify the correct paths to your ARM64 OpenSSL library and headers:
 ```bash
 cabal clean
-rm -rf dist-newstyle build-android
+cabal configure --builddir=build-android \
+  --ghc-options="-optc-I/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include \
+  -optl-L/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib"
 ```
 
----
-
-#### **4. Reconfigure Cabal for ARM64**
-Run Cabal configuration with explicit paths to your ARM64 OpenSSL library and headers:
+#### **4. Rebuild the Project**
+Run the Cabal build process with verbose logging:
 ```bash
-cabal configure --builddir=build-android --enable-shared \
-    --extra-lib-dirs=/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib \
-    --extra-include-dirs=/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include
+cabal build -v --builddir=build-android
 ```
 
 ---
 
-#### **5. Modify `.cabal` File for ARM64**
-Ensure the `.cabal` file contains the correct paths:
+### **Debugging Specific Errors**
 
-```haskell
-library
-  include-dirs:
-      cbits
-      /home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include
-  extra-lib-dirs:
-      /home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib
-  extra-libraries:
-      crypto
-```
+#### **Error: `unsupported ELF machine number`**
+This error indicates a mismatch between the architecture of `libcrypto.a` (ARM64) and the linker used (x86_64). Ensure:
+1. The `LD` environment variable points to `aarch64-linux-android-ld`.
+2. `--ghc-options` correctly includes paths to the ARM64 OpenSSL library.
 
----
-
-#### **6. Rebuild with Cabal**
-Initiate the build process:
-```bash
-cabal build -v
-```
-
----
-
-#### **7. Debugging Common Issues**
-If the issue persists:
-1. Verify that Cabal is using the correct compiler:
+#### **Error: Linking Issues**
+If the linker is still failing, try linking manually:
+1. Extract the offending object file to verify:
    ```bash
-   cabal exec -- ghc --info
+   ar x /home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib/libcrypto.a sha512.o
+   file sha512.o
    ```
-   Ensure the compiler and linker paths point to `aarch64-linux-android21-clang`.
-
-2. Check verbose logs:
+2. Create a minimal C program to test linking:
+   ```c
+   #include <openssl/sha.h>
+   int main() {
+       SHA512_CTX ctx;
+       SHA512_Init(&ctx);
+       return 0;
+   }
+   ```
+   Compile it manually:
    ```bash
-   cabal build -v3
+   aarch64-linux-android21-clang test.c -o test \
+       -L/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib -lcrypto \
+       -I/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include
    ```
-   Look for the linker command and confirm it uses the ARM64 toolchain.
+
+#### **Error: Missing Symbols**
+If missing symbols occur during linking, ensure:
+1. All `.a` files in `libcrypto.a` were compiled with the same toolchain.
+2. Cabal uses the same compiler and linker throughout the build process.
 
 ---
 
-#### **8. Test the Toolchain**
-Create a simple program to confirm the toolchain works:
-```c
-#include <openssl/sha.h>
-#include <stdio.h>
-
-int main() {
-    printf("OpenSSL SHA512 version: %s\n", OPENSSL_VERSION_TEXT);
-    return 0;
-}
-```
-
-Compile with the ARM64 toolchain:
+### **5. Verifying the Binary**
+After a successful build, confirm the binary is for ARM64:
 ```bash
-aarch64-linux-android21-clang -o test test.c -L/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib -I/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include -lcrypto
+file build-android/build/simplexmq-6.2.0.7/simplexmq.so
 ```
 
-Verify the output binary:
-```bash
-file test
+Expected output:
 ```
-
-Expected:
-```
-test: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), dynamically linked, not stripped
+ELF 64-bit LSB shared object, ARM aarch64, version 1 (SYSV), dynamically linked, not stripped
 ```
 
 ---
 
-#### **9. Check Final Output**
-After successful compilation:
-- The `.so` library for SimplexMQ will be in the `build-android` directory.
-- Use `file` to verify its architecture:
-  ```bash
-  file build-android/libsimplexmq.so
-  ```
-
----
-
-### **Conclusion**
-Follow the steps carefully, ensuring the Android ARM64 toolchain is correctly configured and Cabal uses the ARM64 compiler and linker. Let me know the outcome or if any specific errors arise during the process!
+Let me know if any of these steps fail or if you encounter further issues. We can delve deeper as needed!
