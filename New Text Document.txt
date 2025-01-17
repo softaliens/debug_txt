@@ -1,3 +1,25 @@
 cabal configure --builddir=build-android --enable-shared \
     --extra-lib-dirs=/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib \
     --include-dirs=/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include
+
+library
+  ...
+  hs-source-dirs:
+      src
+  default-extensions:
+      StrictData
+  ghc-options: -Weverything -Wno-missing-exported-signatures -Wno-missing-import-lists -Wno-missed-specialisations -Wno-all-missed-specialisations -Wno-unsafe -Wno-safe -Wno-missing-local-signatures -Wno-missing-kind-signatures -Wno-missing-deriving-strategies -Wno-monomorphism-restriction -Wno-prepositive-qualified-module -Wno-implicit-prelude -Wno-missing-safe-haskell-mode -Wno-missing-export-lists -Wno-partial-fields -Wcompat -Werror=incomplete-record-updates -Werror=incomplete-patterns -Werror=incomplete-uni-patterns -Werror=missing-home-modules -Werror=missing-methods -Werror=tabs -Wredundant-constraints -Wincomplete-record-updates -Wunused-type-patterns -O2
+  include-dirs:
+      cbits
+      /home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include
+  c-sources:
+      cbits/sha512.c
+      cbits/sntrup761.c
+  extra-libraries:
+      crypto
+  extra-lib-dirs:
+      /home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib
+  build-depends:
+      aeson ==2.2.*
+  ...
+Explanation of Ch
