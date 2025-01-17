@@ -1,91 +1,103 @@
-The error you encountered suggests that there is a mismatch in architecture between the dependencies (e.g., `libcrypto.a`) and the target platform (`aarch64` for Android ARM64). Specifically, the static library `libcrypto.a` from OpenSSL appears to have been compiled for a different architecture.
-
-Let's address this systematically.
+The recurring issue indicates that the linker is still trying to use an OpenSSL library (`libcrypto.a`) that was not properly cross-compiled for ARM64. Let's double-check and debug systematically.
 
 ---
 
-### **1. Root Cause**
-The error `unsupported ELF machine number 183` indicates that the linker (`ld`) tried to use a binary compiled for a different architecture (likely x86_64 instead of ARM64). This happened because the OpenSSL library in `deps/openssl-1.1.1u/output/lib` was not cross-compiled for the target platform.
+### **1. Root Cause Validation**
+The error suggests that:
+- The `libcrypto.a` file in `/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib` is for a different architecture (e.g., x86_64).
+- This happens if:
+  - OpenSSL was not successfully cross-compiled.
+  - The linker is not using the cross-compiled OpenSSL libraries.
 
 ---
 
-### **2. Solution**
-You need to:
-1. Cross-compile OpenSSL for the Android ARM64 architecture.
-2. Ensure the SimplexMQ build process uses the correct OpenSSL libraries.
+### **2. Debugging Steps**
 
----
-
-### **3. Steps to Fix**
-
-#### **Step 1: Cross-Compile OpenSSL**
-To cross-compile OpenSSL for Android ARM64:
-1. Download OpenSSL:
+#### **Step 1: Verify Cross-Compiled OpenSSL**
+Check the architecture of `libcrypto.a` to confirm it was compiled for ARM64:
+```bash
+file /home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib/libcrypto.a
+```
+Expected output:
+```
+libcrypto.a: current ar archive
+member 1: sha512.o: ELF 64-bit LSB relocatable, ARM aarch64, ...
+```
+If it is not `ARM aarch64`, the OpenSSL build process was incorrect. In that case:
+1. Clean and rebuild OpenSSL:
    ```bash
-   cd deps
-   wget https://www.openssl.org/source/openssl-1.1.1u.tar.gz
-   tar -xvzf openssl-1.1.1u.tar.gz
-   cd openssl-1.1.1u
-   ```
-
-2. Configure OpenSSL for Android ARM64:
-   ```bash
-   export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
-   export CC=aarch64-linux-android21-clang
-   export AR=aarch64-linux-android-ar
-   export RANLIB=aarch64-linux-android-ranlib
-
+   cd /home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u
+   make clean
    ./Configure android-arm64 no-shared no-dso --prefix=$(pwd)/output
-   ```
-
-3. Build OpenSSL:
-   ```bash
    make -j$(nproc)
    make install
    ```
 
-   After this step, the ARM64 versions of `libcrypto.a` and `libssl.a` will be in the `output/lib` directory.
+2. Recheck `libcrypto.a` using the `file` command.
 
 ---
 
-#### **Step 2: Configure Cabal to Use Cross-Compiled OpenSSL**
-Update the build environment to ensure SimplexMQ uses the correct OpenSSL libraries:
-1. Set `LIBRARY_PATH` and `CPATH` for the cross-compiled OpenSSL:
+#### **Step 2: Ensure Cabal Uses Correct Libraries**
+Verify that the build environment is pointing to the correct OpenSSL libraries:
+```bash
+export LIBRARY_PATH=/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib
+export CPATH=/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include
+```
+
+Test these paths by compiling a simple test program that links against OpenSSL:
+```c
+#include <openssl/sha.h>
+#include <stdio.h>
+
+int main() {
+    printf("OpenSSL SHA512: %s\n", SHA512_version);
+    return 0;
+}
+```
+Compile it with the ARM64 toolchain:
+```bash
+aarch64-linux-android21-clang test.c -o test -L$LIBRARY_PATH -lcrypto -I$CPATH
+```
+If this fails, the issue is with the OpenSSL libraries.
+
+---
+
+#### **Step 3: Force Cabal to Use Correct Libraries**
+Edit the Cabal project file `simplexmq.cabal` and explicitly link against the correct libraries:
+1. Find the library linking section for `libcrypto` and `libssl`.
+2. Add the full path to your cross-compiled libraries:
+   ```haskell
+   extra-lib-dirs: /home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib
+   include-dirs: /home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include
+   ```
+3. Reconfigure Cabal:
    ```bash
-   export LIBRARY_PATH=$(pwd)/output/lib
-   export CPATH=$(pwd)/output/include
+   cabal clean
+   cabal configure --builddir=build-android --enable-shared
    ```
 
-2. Verify paths:
-   - `$(pwd)/output/lib` should contain `libcrypto.a` and `libssl.a`.
-   - `$(pwd)/output/include` should contain OpenSSL headers.
-
 ---
 
-#### **Step 3: Rebuild SimplexMQ**
-Return to the root directory of the SimplexMQ repository and rebuild:
+### **3. Test the Build**
+Rebuild the project:
 ```bash
-cabal clean
 cabal build
 ```
 
+If the build still fails:
+- Run Cabal in verbose mode to gather more details:
+  ```bash
+  cabal build -v
+  ```
+
 ---
 
-### **4. Verifying the Build**
-1. If the build succeeds, the `.so` file will be generated in `dist-newstyle`.
-2. Use the `file` command to confirm that the `.so` file is for ARM64:
+### **4. Alternative Debugging**
+If the above steps fail, there may be residual x86_64 binaries causing conflicts:
+1. Remove the `output` directory of OpenSSL and rebuild.
+2. Verify that no x86_64 libraries are being picked up during the build process:
    ```bash
-   file dist-newstyle/build/aarch64-linux-android/ghc-*/simplexmq-*/build/libsimplexmq.so
+   ldd dist-newstyle/build/aarch64-linux-android/ghc-*/simplexmq-*/build/libsimplexmq.so
    ```
-   Output should indicate `ARM aarch64`.
 
----
-
-### **5. Debugging Further Issues**
-If you encounter additional errors:
-- **OpenSSL linking errors:** Ensure `LIBRARY_PATH` and `CPATH` point to the correct cross-compiled libraries.
-- **GHC-specific errors:** Cabal might need additional flags for cross-compilation. Consult the GHC cross-compilation documentation.
-
----
-
-Let me know if you face issues at any step, and I can assist further.
+Let me know if the problem persists, and I’ll guide you through advanced debugging steps!
