@@ -6,6 +6,11 @@
     CFLAGS="-fuse-ld=lld" \
     LDFLAGS="-fuse-ld=lld"
 
+aarch64-linux-android21-clang -o test_binary \
+    -L/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/lib \
+    -I/home/baymax/Downloads/simplex-xmq/deps/openssl-1.1.1u/output/include \
+    -lcrypto -fuse-ld=lld
+
 
 
 
